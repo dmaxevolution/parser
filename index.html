@@ -1,0 +1,278 @@
+<!DOCTYPE html>
+<html lang="id">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+  <title>PWA Rekap Borongan</title>
+  <link rel="stylesheet" href="style.css">
+</head>
+<body>
+
+  <div class="app-wrapper">
+    <header style="display:flex; align-items:center; gap:8px;">
+      <!-- LOGO HEADER -->
+      <img id="appHeaderLogo" src="" alt="Logo" style="width:32px; height:32px; border-radius:50%; object-fit:cover; display:none; background:white;">
+      <div style="flex:1;">
+        <h2 style="font-size: 0.95em;">REKAP PENGERJAAN</h2>
+        <small style="font-size: 0.7em;">Komisi & Kuota Karyawan</small>
+      </div>
+      <div class="clock-box">
+        <div id="real-date" style="font-weight: bold;">-</div>
+        <div id="real-time">-</div>
+      </div>
+    </header>
+
+    <nav>
+      <button class="active" onclick="switchTab('input')">Input WA</button>
+      <button onclick="switchTab('rekap')">Rekap</button>
+      <button onclick="switchTab('settings')">Pengaturan</button>
+    </nav>
+
+    <div class="container">
+
+      <!-- MODE SAKELAR KOMISI -->
+      <div class="switch-container">
+        <span>Hitung Komisi: <strong id="commission-status-label" style="color:var(--success);">AKTIF</strong></span>
+        <label class="switch">
+          <input type="checkbox" id="commissionToggle" checked onchange="toggleCommissionMode()">
+          <span class="slider"></span>
+        </label>
+      </div>
+      
+      <!-- TAB 1: INPUT WA -->
+      <div id="tab-input" class="tab-content active">
+        <div class="card">
+          <h3>1. Pilih Karyawan</h3>
+          <div class="form-group">
+            <select id="input-karyawan-select" style="font-weight:bold; color:var(--primary);"></select>
+          </div>
+        </div>
+
+        <div class="card">
+          <h3>2. Paste Chat WA</h3>
+          <p style="font-size:0.75em; color:#64748b; margin-bottom:6px;">Format 3 kata: <i>cak ckl 3</i> | Format 2 kata: <i>bud 4</i> (Auto Setrika)</p>
+          <textarea id="inputText" placeholder="cak ckl 3&#10;bud 4"></textarea>
+          <button class="btn btn-primary" style="width:100%; font-size:0.9em;" onclick="processInputWA()">Simpan Pengerjaan</button>
+        </div>
+      </div>
+
+      <!-- TAB 2: REKAP DATA -->
+      <div id="tab-rekap" class="tab-content">
+        
+        <!-- BACKUP DATA (DROPDOWN SVG & INDEXEDDB) -->
+        <div class="card" style="background:#eff6ff; border-color:#bfdbfe;">
+          <h3>💾 Backup & Restore Data</h3>
+          <div class="form-group">
+            <select id="backupTypeSelect" style="padding:6px; font-size:0.8em; margin-bottom:6px;">
+              <option value="json">IndexedDB (JSON Data)</option>
+              <option value="svg">SVG Vector Image File</option>
+            </select>
+          </div>
+          <div style="display:flex; gap:5px;">
+            <button class="btn btn-primary" style="flex:1;" onclick="executeExportBackup()">📥 Download</button>
+            <button class="btn btn-warning" style="flex:1;" onclick="document.getElementById('importFileInput').click()">📤 Restore</button>
+            <input type="file" id="importFileInput" style="display:none;" accept=".json,.svg" onchange="importBackupFile(event)">
+          </div>
+        </div>
+
+        <!-- BUKTI HARIAN KARYAWAN (2 KOLOM: WA & WA BISNIS) -->
+        <div class="card">
+          <h3>📱 Bukti WA Karyawan</h3>
+          <div class="form-group">
+            <select id="rekap-karyawan-select" onchange="generateEmployeeDailyReport()"></select>
+          </div>
+          <textarea id="employeeReportText" style="height:100px; font-family:monospace; font-size:0.8em;" readonly></textarea>
+          
+          <!-- OPSI PENGIRIMAN 2 KOLOM -->
+          <div style="display: flex; gap: 8px; margin-top: 8px;">
+            <!-- KOLOM 1: WA BIASA -->
+            <div style="flex: 1; background: #f8fafc; padding: 8px; border-radius: 6px; border: 1px solid #e2e8f0; text-align: center;">
+              <small style="font-weight: bold; color: #0f172a; display: block; margin-bottom: 6px;">WhatsApp Biasa</small>
+              <div style="display: flex; gap: 4px;">
+                <button class="btn btn-success" style="flex: 1; font-size: 0.75em; padding: 6px 2px;" onclick="sendReportWA('regular', 'text')">📄 Teks</button>
+                <button class="btn btn-primary" style="flex: 1; font-size: 0.75em; padding: 6px 2px;" onclick="sendReportWA('regular', 'image')">🖼️ Gambar</button>
+              </div>
+            </div>
+
+            <!-- KOLOM 2: WA BISNIS -->
+            <div style="flex: 1; background: #f0fdf4; padding: 8px; border-radius: 6px; border: 1px solid #bbf7d0; text-align: center;">
+              <small style="font-weight: bold; color: #166534; display: block; margin-bottom: 6px;">WhatsApp Bisnis</small>
+              <div style="display: flex; gap: 4px;">
+                <button class="btn btn-success" style="flex: 1; font-size: 0.75em; padding: 6px 2px; background-color: #15803d;" onclick="sendReportWA('business', 'text')">📄 Teks</button>
+                <button class="btn btn-primary" style="flex: 1; font-size: 0.75em; padding: 6px 2px;" onclick="sendReportWA('business', 'image')">🖼️ Gambar</button>
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <!-- TABEL REKAP ALL -->
+        <div class="card">
+          <h3>
+            <span>Pengerjaan Hari Ini</span>
+            <button class="btn btn-danger" style="padding:2px 6px; font-size:0.7em;" onclick="clearAllOrders()">Reset</button>
+          </h3>
+          <div class="table-responsive">
+            <table>
+              <thead>
+                <tr>
+                  <th>Jam</th>
+                  <th>Nama</th>
+                  <th>Jenis</th>
+                  <th>Qty</th>
+                  <th class="com-col">Omset</th>
+                  <th class="com-col">Komisi</th>
+                  <th>Aksi</th>
+                </tr>
+              </thead>
+              <tbody id="dataTable"></tbody>
+            </table>
+          </div>
+        </div>
+
+        <!-- CETAK LAPORAN (PNG & THERMAL) -->
+        <div class="card">
+          <h3>Cetak Laporan</h3>
+          <div style="display:flex; gap:6px;">
+            <button class="btn btn-primary" style="flex:1;" onclick="printLaporan('png')">🖼️ Gambar PNG</button>
+            <button class="btn btn-success" style="flex:1;" onclick="printLaporan('thermal')">🧾 Struk 58mm</button>
+          </div>
+        </div>
+      </div>
+
+      <!-- TAB 3: PENGATURAN -->
+      <div id="tab-settings" class="tab-content">
+        
+        <!-- SLOT UPLOAD LOGO -->
+        <div class="card" style="background:#f0fdf4; border-color:#bbf7d0;">
+          <h3>🖼️ Upload Logo Aplikasi</h3>
+          <p style="font-size:0.7em; color:#166534; margin-bottom:6px;">1 Logo otomatis digunakan untuk Header, Nota PNG, Favicon Browser, dan Splash Screen PWA.</p>
+          <input type="file" id="logoInput" accept="image/*" style="font-size:0.8em;" onchange="handleLogoUpload(event)">
+        </div>
+
+        <!-- KELOLA KARYAWAN -->
+        <div class="card">
+          <h3>Kelola Karyawan</h3>
+          <div style="display:flex; gap:4px; margin-bottom:8px;">
+            <input type="text" id="newKaryawanInput" placeholder="Nama Baru" style="flex:1;">
+            <button class="btn btn-primary" onclick="addKaryawan()">+ Tambah</button>
+          </div>
+          <div id="karyawanListContainer"></div>
+        </div>
+
+        <!-- KAMUS BARANG -->
+        <div class="card">
+          <h3>Kamus Jenis Barang</h3>
+          <div style="background:#f1f5f9; padding:8px; border-radius:6px; margin-bottom:8px;">
+            <div class="form-group"><input type="text" id="itemAlias" placeholder="Kode WA (cth: stk)"></div>
+            <div class="form-group"><input type="text" id="itemName" placeholder="Nama Pekerjaan (cth: Setrika)"></div>
+            <div style="display:flex; gap:4px;" class="form-group">
+              <select id="itemUnit" style="flex:1;"><option value="kg">kg</option><option value="pcs">pcs</option></select>
+              <input type="number" id="itemPrice" placeholder="Harga Omset" style="flex:1;">
+            </div>
+            <button class="btn btn-success" style="width:100%;" onclick="addItem()">+ Simpan Barang</button>
+          </div>
+          <div class="table-responsive">
+            <table>
+              <thead>
+                <tr>
+                  <th>Kode</th>
+                  <th>Jenis</th>
+                  <th>Satuan</th>
+                  <th class="com-col">Omset</th>
+                  <th>Aksi</th>
+                </tr>
+              </thead>
+              <tbody id="itemsTable"></tbody>
+            </table>
+          </div>
+        </div>
+
+        <!-- SKEMA KOMISI BERJENJANG -->
+        <div class="card com-col">
+          <h3>Skema Komisi Karyawan</h3>
+          <div style="background:#f1f5f9; padding:8px; border-radius:6px; margin-bottom:8px;">
+            <div class="form-group">
+              <div style="display:flex; gap:4px;">
+                <select id="ruleKaryawanSelect" style="flex:1;"></select>
+                <select id="ruleItemSelect" style="flex:1;"></select>
+              </div>
+            </div>
+            <div class="form-group">
+              <input type="number" id="ruleMinQuota" placeholder="Kuota Min (Komisi Rp 0)">
+            </div>
+            <div style="display:flex; gap:4px;" class="form-group">
+              <input type="number" id="ruleTier1Limit" placeholder="Limit T1 (75)" style="flex:1;">
+              <input type="number" id="ruleTier1Rate" placeholder="Rp T1" style="flex:1;">
+            </div>
+            <div class="form-group">
+              <input type="number" id="ruleTier2Rate" placeholder="Rp T2 (> Limit T1)">
+            </div>
+            <button class="btn btn-success" style="width:100%;" onclick="addCommissionRule()">+ Simpan Skema</button>
+          </div>
+
+          <div class="table-responsive">
+            <table>
+              <thead>
+                <tr>
+                  <th>Karyawan</th>
+                  <th>Jenis</th>
+                  <th>Min</th>
+                  <th>Tier 1</th>
+                  <th>Tier 2</th>
+                  <th>Aksi</th>
+                </tr>
+              </thead>
+              <tbody id="commissionRulesTable"></tbody>
+            </table>
+          </div>
+        </div>
+
+      </div>
+    </div>
+
+    <!-- FIXER MODAL -->
+    <div id="fixerModal" class="modal">
+      <div class="modal-content">
+        <h3 style="color:var(--danger); font-size:0.9em;">⚠️ Kode WA Tidak Dikenali</h3>
+        <p style="font-size:0.75em; margin:6px 0;">Pengerjaan karyawan <b id="fixerEmpLabel"></b>:</p>
+        <div style="background:#fff3cd; padding:6px; border-radius:4px; font-weight:bold; font-size:0.85em; margin-bottom:8px;" id="fixerRawText">-</div>
+        
+        <div class="form-group">
+          <label>Pilih Jenis Pekerjaan:</label>
+          <select id="fixerItem"></select>
+        </div>
+        <div class="form-group">
+          <label>Jumlah (Qty):</label>
+          <input type="number" step="0.01" id="fixerQty">
+        </div>
+        <div style="display:flex; gap:6px; margin-top:10px;">
+          <button class="btn btn-danger" style="flex:1;" onclick="skipFixerItem()">Lewati</button>
+          <button class="btn btn-success" style="flex:1;" onclick="saveFixerItem()">Simpan</button>
+        </div>
+      </div>
+    </div>
+
+    <!-- PRINTER AREA -->
+    <div id="thermal-preview" class="printable-area" style="display:none;">
+      <div class="thermal-receipt">
+        <h4 class="center" id="th-title">LAPORAN PENGERJAAN</h4>
+        <p class="center" id="th-subtitle">-</p>
+        <div class="line"></div>
+        <p>Tgl: <span id="th-print-time">-</span></p>
+        <div class="line"></div>
+        <table style="width:100%;">
+          <tbody id="th-items"></tbody>
+        </table>
+        <div class="line"></div>
+        <p style="text-align:right;" id="th-total-container"><strong>TOTAL KOMISI: <span id="th-total">Rp 0</span></strong></p>
+      </div>
+    </div>
+  </div>
+
+  <!-- URUTAN PEMANGGILAN FILE SANGAT PENTING -->
+  <script src="db.js"></script>
+  <script src="app.js"></script>
+  <script src="wa-manager.js"></script>
+  <script src="bluetooth-print.js"></script>
+</body>
+</html>
