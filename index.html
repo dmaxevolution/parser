@@ -3,7 +3,15 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
-  <title>PWA Rekap Borongan</title>
+  <title>Hasil Kerja Laundry</title>
+  <meta name="theme-color" content="#2563eb">
+  <meta name="mobile-web-app-capable" content="yes">
+  <meta name="apple-mobile-web-app-capable" content="yes">
+  <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+  <meta name="apple-mobile-web-app-title" content="Hasil Kerja Laundry">
+  <link rel="manifest" href="manifest.json">
+  <link rel="icon" type="image/png" href="laundryicon.png">
+  <link rel="apple-touch-icon" href="laundryicon.png">
   <link rel="stylesheet" href="style.css">
 </head>
 <body>
@@ -22,7 +30,7 @@
       </div>
     </header>
 
-    <nav>
+    <nav class="sticky-main-tabs">
       <button class="active" onclick="switchTab('input')">Input WA</button>
       <button onclick="switchTab('rekap')">Rekap</button>
       <button onclick="switchTab('settings')">Pengaturan</button>
@@ -50,9 +58,22 @@
 
         <div class="card">
           <h3>2. Paste Chat WA</h3>
-          <p style="font-size:0.75em; color:#64748b; margin-bottom:6px;">Format 3 kata: <i>cak ckl 3</i> | Format 2 kata: <i>bud 4</i> (Auto Setrika)</p>
-          <textarea id="inputText" placeholder="cak ckl 3&#10;bud 4"></textarea>
+          <p style="font-size:0.75em; color:#64748b; margin-bottom:6px;">Contoh: <i>budi 3 selimut 3 bc 3</i> atau <i>[19/09/2020] rahma budi 7, selimut 3</i>. Baris lanjutan tetap milik customer sebelumnya sampai muncul customer baru.</p>
+          <textarea id="inputText" placeholder="[19/09/2020] rahma budi 7, selimut 3
+ria 4
+selimut 3
+bc 2"></textarea>
           <button class="btn btn-primary" style="width:100%; font-size:0.9em;" onclick="processInputWA()">Simpan Pengerjaan</button>
+        </div>
+
+        <div class="card" style="background:#fffbeb; border-color:#fde68a;">
+          <h3>🧠 Ajarkan Logika Parser</h3>
+          <p style="font-size:0.75em; color:#64748b; margin-bottom:6px;">Kolom 1 = copas WA yang salah dibaca sistem. Kolom 2 = bentuk/logika yang benar. Setelah disimpan, pola tersebut akan dipakai lagi.</p>
+          <textarea id="logicWrongInput" placeholder="Contoh WA yang dianggap salah sistem"></textarea>
+          <div style="text-align:center;font-weight:900;font-size:20px;margin:4px 0;">=</div>
+          <textarea id="logicNewRule" placeholder="Logika benar, contoh: budi 3 selimut 3 bc 3"></textarea>
+          <button class="btn btn-warning" style="width:100%; font-size:0.9em;" onclick="saveNewParserLogic()">💾 Simpan Logika Baru</button>
+        </div>
         </div>
       </div>
 
@@ -69,7 +90,7 @@
             </select>
           </div>
           <div style="display:flex; gap:5px;">
-            <button class="btn btn-primary" style="flex:1;" onclick="executeExportBackup()">📥 Download</button>
+            <button class="btn btn-primary" style="flex:1;" onclick="executeExportBackup()">💾 Backup</button>
             <button class="btn btn-warning" style="flex:1;" onclick="document.getElementById('importFileInput').click()">📤 Restore</button>
             <input type="file" id="importFileInput" style="display:none;" accept=".json,.svg" onchange="importBackupFile(event)">
           </div>
@@ -252,6 +273,22 @@
       </div>
     </div>
 
+    <!-- EDIT ORDER MODAL -->
+    <div id="editOrderModal" class="modal" style="display:none;">
+      <div class="modal-content">
+        <h3>✏️ Edit Pengerjaan</h3>
+        <input type="hidden" id="editOrderId">
+        <div class="form-group"><label>Karyawan</label><select id="editOrderEmployee"></select></div>
+        <div class="form-group"><label>Customer</label><input id="editOrderCustomer" type="text" placeholder="Nama customer"></div>
+        <div class="form-group"><label>Jenis Pekerjaan</label><select id="editOrderItem"></select></div>
+        <div class="form-group"><label>Jumlah</label><input id="editOrderQty" type="number" step="0.01" min="0"></div>
+        <div style="display:flex;gap:6px;margin-top:10px;">
+          <button class="btn btn-danger" style="flex:1;" onclick="closeEditOrder()">Batal</button>
+          <button class="btn btn-success" style="flex:1;" onclick="saveEditedOrder()">💾 Simpan</button>
+        </div>
+      </div>
+    </div>
+
     <!-- PRINTER AREA -->
     <div id="thermal-preview" class="printable-area" style="display:none;">
       <div class="thermal-receipt">
@@ -274,5 +311,12 @@
   <script src="app.js"></script>
   <script src="wa-manager.js"></script>
   <script src="bluetooth-print.js"></script>
+  <script>
+    if ('serviceWorker' in navigator) {
+      window.addEventListener('load', () => {
+        navigator.serviceWorker.register('./sw.js').catch(err => console.warn('Service Worker:', err));
+      });
+    }
+  </script>
 </body>
 </html>

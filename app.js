@@ -1,4 +1,27 @@
 
+/* === PARSER RULE: ALIAS / NAMA PEKERJAAN BUKAN CUSTOMER === */
+function isWorkAliasOrName(token) {
+    const t = String(token || '').trim().toLowerCase();
+    if (!t) return false;
+    try {
+        const items = (typeof getItems === 'function') ? getItems() : [];
+        for (const item of (items || [])) {
+            const name = String(item?.name || item?.nama || '').trim().toLowerCase();
+            const aliases = String(item?.aliases || item?.alias || '')
+                .split(',')
+                .map(x => x.trim().toLowerCase())
+                .filter(Boolean);
+            if (t === name || aliases.includes(t)) return true;
+        }
+    } catch (_) {}
+    return [
+        'stk','setrika','cks','ckl','cb','sepatu','selimut',
+        'bc','bedcover','bed cover','gorden','boneka','bnk',
+        'seprai','sprai','spt','spatu'
+    ].includes(t);
+}
+
+
 /* =========================================================
    MODERN UI DIALOGS — NO window.alert / confirm / prompt
    ========================================================= */
@@ -115,31 +138,20 @@ function handleLogoUpload(event) {
 
 function loadSavedLogo() {
   const savedLogo = localStorage.getItem('app_custom_logo');
-  if (savedLogo) applyLogo(savedLogo);
+  applyLogo(savedLogo || 'laundryicon.png');
 }
 
 function applyLogo(logoData) {
+  const src = logoData || 'laundryicon.png';
   const headerLogo = document.getElementById('appHeaderLogo');
   if (headerLogo) {
-    headerLogo.src = logoData;
+    headerLogo.src = src;
     headerLogo.style.display = 'block';
   }
 
-  let favicon = document.querySelector("link[rel*='icon']");
-  if (!favicon) {
-    favicon = document.createElement('link');
-    favicon.rel = 'shortcut icon';
-    document.getElementsByTagName('head')[0].appendChild(favicon);
-  }
-  favicon.href = logoData;
-
-  let appleIcon = document.querySelector("link[rel='apple-touch-icon']");
-  if (!appleIcon) {
-    appleIcon = document.createElement('link');
-    appleIcon.rel = 'apple-touch-icon';
-    document.getElementsByTagName('head')[0].appendChild(appleIcon);
-  }
-  appleIcon.href = logoData;
+  document.querySelectorAll("link[rel*='icon'], link[rel='apple-touch-icon']").forEach(el => {
+    el.href = src;
+  });
 }
 
 // Render Seluruh Tampilan UI
@@ -312,16 +324,21 @@ function renderOrdersTable() {
     const tbody = document.getElementById('dataTable');
     if (tbody) {
       tbody.innerHTML = orders.map(o => {
-        const custText = o.customer ? `[${o.customer}] ` : '';
+        const custText = o.customer ? `[${escapeHtml(o.customer)}] ` : '';
         return `
           <tr>
-            <td><small>${o.waktu}</small></td>
-            <td><b>${o.karyawan}</b></td>
-            <td>${custText}${o.jenis}</td>
-            <td>${o.qty} ${o.unit}</td>
+            <td><small>${escapeHtml(o.waktu || '')}</small></td>
+            <td><b>${escapeHtml(o.karyawan || '')}</b></td>
+            <td>${custText}${escapeHtml(o.jenis || '')}</td>
+            <td>${o.qty} ${escapeHtml(o.unit || '')}</td>
             <td class="com-col">Rp ${(o.totalOmset || 0).toLocaleString()}</td>
             <td class="com-col">Rp ${(o.totalKomisi || 0).toLocaleString()}</td>
-            <td><button class="btn btn-danger" style="padding:2px 4px; font-size:0.7em;" onclick="deleteOrder(${o.id})">X</button></td>
+            <td>
+              <div class="report-actions">
+                <button class="report-action-btn edit" onclick="editOrder(${o.id})" title="Edit" aria-label="Edit">✏️</button>
+                <button class="report-action-btn delete" onclick="deleteOrder(${o.id})" title="Hapus" aria-label="Hapus">🗑️</button>
+              </div>
+            </td>
           </tr>
         `;
       }).join('');
@@ -330,10 +347,82 @@ function renderOrdersTable() {
   };
 }
 
-function deleteOrder(id) {
+function escapeHtml(v) {
+  return String(v ?? '').replace(/[&<>"']/g, ch => ({
+    '&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#039;'
+  }[ch]));
+}
+
+async function editOrder(id) {
+  const tx = db.transaction(['orders','karyawan','items'], 'readonly');
+  const orderReq = tx.objectStore('orders').get(id);
+  const empReq = tx.objectStore('karyawan').getAll();
+  const itemReq = tx.objectStore('items').getAll();
+
+  orderReq.onsuccess = () => {
+    const o = orderReq.result;
+    if (!o) return uiToast('Data pengerjaan tidak ditemukan.');
+    empReq.onsuccess = () => {
+      itemReq.onsuccess = () => {
+        const empSel=document.getElementById('editOrderEmployee');
+        const itemSel=document.getElementById('editOrderItem');
+        empSel.innerHTML=empReq.result.map(k=>`<option value="${escapeHtml(k.nama)}">${escapeHtml(k.nama)}</option>`).join('');
+        itemSel.innerHTML=itemReq.result.map(i=>`<option value="${escapeHtml(i.alias)}">${escapeHtml(i.name)} (${escapeHtml(i.unit)})</option>`).join('');
+        document.getElementById('editOrderId').value=o.id;
+        document.getElementById('editOrderCustomer').value=o.customer || '';
+        document.getElementById('editOrderQty').value=o.qty;
+        empSel.value=o.karyawan || '';
+        itemSel.value=o.itemAlias || '';
+        document.getElementById('editOrderModal').style.display='flex';
+      };
+    };
+  };
+}
+
+function closeEditOrder() {
+  const m=document.getElementById('editOrderModal');
+  if(m) m.style.display='none';
+}
+
+async function saveEditedOrder() {
+  const id=Number(document.getElementById('editOrderId').value);
+  const customer=document.getElementById('editOrderCustomer').value.trim();
+  const karyawan=document.getElementById('editOrderEmployee').value;
+  const itemAlias=document.getElementById('editOrderItem').value;
+  const qty=parseFloat(document.getElementById('editOrderQty').value);
+  if(!id || !karyawan || !itemAlias || !Number.isFinite(qty) || qty<=0) {
+    uiToast('Lengkapi data edit terlebih dahulu.'); return;
+  }
+  const items=await new Promise(resolve=>{
+    const t=db.transaction('items','readonly');
+    t.objectStore('items').get(itemAlias).onsuccess=e=>resolve(e.target.result);
+  });
+  if(!items){ uiToast('Jenis pekerjaan tidak ditemukan.'); return; }
+
+  const todayStr=new Date().toLocaleDateString('id-ID');
+  const orders=await getTodayOrders(todayStr);
+  const current=orders.find(o=>o.id===id);
+  const rules=await getCommRulesMap();
+  const rule=rules[`${karyawan}_${itemAlias}`]||{minQuota:0,tier1Limit:9999,tier1Rate:0,tier2Rate:0};
+  const currentEmpQty=orders.filter(o=>o.id!==id && o.karyawan===karyawan && o.itemAlias===itemAlias)
+    .reduce((sum,o)=>sum+Number(o.qty||0),0);
+  const komisi=calculateTieredCommission(rule.minQuota,rule.tier1Limit,rule.tier1Rate,rule.tier2Rate,currentEmpQty,qty);
+
+  const updated={
+    ...current,
+    karyawan, customer, itemAlias, jenis:items.name, unit:items.unit, qty,
+    price:items.price||0, totalOmset:qty*(items.price||0), totalKomisi:komisi
+  };
+  const tx=db.transaction('orders','readwrite');
+  tx.objectStore('orders').put(updated);
+  tx.oncomplete=()=>{ closeEditOrder(); renderAll(); uiToast('Pengerjaan berhasil diedit.'); };
+}
+
+async function deleteOrder(id) {
+  if (!(await uiConfirm('Hapus data pengerjaan ini?','Hapus Pengerjaan'))) return;
   const tx = db.transaction('orders', 'readwrite');
   tx.objectStore('orders').delete(id);
-  tx.oncomplete = () => renderAll();
+  tx.oncomplete = () => { renderAll(); uiToast('Pengerjaan dihapus.'); };
 }
 
 async function clearAllOrders() {

@@ -65,7 +65,14 @@ function getItemsMap() {
     const tx = db.transaction('items', 'readonly');
     const map = {};
     tx.objectStore('items').getAll().onsuccess = (e) => {
-      e.target.result.forEach(item => { map[item.alias] = item; });
+      e.target.result.forEach(item => {
+        const aliases = String(item.aliases || item.alias || '')
+          .split(',')
+          .map(x => x.trim().toLowerCase()).filter(Boolean);
+        aliases.forEach(a => { map[a] = item; });
+        const name = String(item.name || '').trim().toLowerCase();
+        if (name) map[name] = item;
+      });
       resolve(map);
     };
   });

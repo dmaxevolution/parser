@@ -210,3 +210,41 @@ input:checked + .slider:before { transform: translateX(16px); }
   .printable-area, .printable-area * { visibility: visible; }
   .printable-area { position: absolute; left: 0; top: 0; width: 100%; }
 }
+/* === UPDATE: STICKY MAIN TABS === */
+.sticky-main-tabs {
+  position: sticky !important;
+  top: 0;
+  z-index: 1000;
+  background: var(--bg, #0b1020);
+  backdrop-filter: blur(10px);
+}
+
+/* === UPDATE: REKAP ACTION ICONS === */
+.report-actions {
+  display:flex;
+  align-items:center;
+  justify-content:flex-end;
+  gap:8px;
+}
+.report-action-btn {
+  width:34px;
+  height:34px;
+  min-width:34px;
+  border:0;
+  border-radius:9px;
+  display:inline-flex;
+  align-items:center;
+  justify-content:center;
+  cursor:pointer;
+  font-size:17px;
+  line-height:1;
+}
+.report-action-btn.edit { background:#24547d; color:#fff; }
+.report-action-btn.delete { background:#702832; color:#fff; }
+.report-action-btn:hover { filter:brightness(1.15); }
+
+.app-wrapper { position: relative; }
+.sticky-main-tabs { box-shadow: 0 2px 10px rgba(15,23,42,.08); }
+.report-actions { white-space:nowrap; }
+#editOrderModal .modal-content { max-height:90vh; overflow:auto; }
+#appHeaderLogo { object-fit:contain; background:#fff; }

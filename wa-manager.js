@@ -23,69 +23,151 @@ let currentFixerItem = null;
 const LocalAI = {
   DEFAULT_ALIAS_2_WORDS: 'stk',
 
-  analyzeLine(line, itemsMap) {
-    const parts = line.trim().replace(/\s+/g, ' ').split(' ');
+  normalizeSpaces(text) {
+    return String(text || '').replace(/\u00a0/g, ' ').replace(/\s+/g, ' ').trim();
+  },
 
-    let customer = '';
-    let alias = '';
-    let qty = 0;
+  // Abaikan header pesan WA: [tanggal/jam] NAMA_PENGIRIM
+  // Contoh: [19/09/2020] rahma budi 7 -> budi 7
+  stripWAHeader(line) {
+    let s = this.normalizeSpaces(line);
+    const m = s.match(/^\s*\[[^\]]+\]\s+\S+\s*:?\s*(.*)$/);
+    return m ? this.normalizeSpaces(m[1]) : s;
+  },
 
-    // PATTERN 1: 2 KATA (Contoh: "bud 4" -> Cust: bud, Qty: 4, Barang: stk)
-    if (parts.length === 2) {
-      customer = parts[0];
-      alias = this.DEFAULT_ALIAS_2_WORDS;
-      qty = parseFloat(parts[1]);
+  getLearnedRules() {
+    try { return JSON.parse(localStorage.getItem('wa_parser_logic_rules') || '{}'); }
+    catch (_) { return {}; }
+  },
 
-      if (isNaN(qty)) {
-        return {
-          status: 'ERROR',
-          reason: 'INVALID_QTY',
-          suggestion: `Format 2 kata terdeteksi ("${customer}"), tapi jumlah "${parts[1]}" bukan angka.`
-        };
-      }
-    } 
-    // PATTERN 2: 3 KATA ATAU LEBIH (Contoh: "cak ckl 3")
-    else if (parts.length >= 3) {
-      customer = parts[0];
-      alias = parts[1].toLowerCase();
-      qty = parseFloat(parts[2]);
-
-      if (isNaN(qty)) {
-        return {
-          status: 'ERROR',
-          reason: 'INVALID_QTY',
-          suggestion: `Jumlah "${parts[2]}" pada customer "${customer}" bukan angka yang valid.`
-        };
-      }
-    } else {
-      return {
-        status: 'ERROR',
-        reason: 'TOO_SHORT',
-        suggestion: 'Input terlalu pendek. Minimal 2 kata (contoh: "bud 4") atau 3 kata (contoh: "cak ckl 3").'
-      };
-    }
-
-    if (!itemsMap[alias]) {
-      return {
-        status: 'ERROR',
-        reason: 'UNKNOWN_ALIAS',
-        suggestion: `Kode barang "${alias}" tidak ditemukan di Kamus.`
-      };
-    }
-
-    return {
-      status: 'OK',
-      data: { customer, alias, qty }
-    };
+  saveLearnedRule(raw, logic) {
+    const rules = this.getLearnedRules();
+    rules[this.normalizeSpaces(raw).toLowerCase()] = this.normalizeSpaces(logic);
+    localStorage.setItem('wa_parser_logic_rules', JSON.stringify(rules));
   },
 
   cleanInput(rawText) {
-    return rawText
-      .split('\n')
-      .map(line => line.trim())
-      .filter(line => line.length > 0);
+    return String(rawText || '')
+      .split(/\r?\n/)
+      .map(line => this.stripWAHeader(line))
+      .filter(Boolean);
+  },
+
+  analyzeBlock(rawText, itemsMap) {
+    const learned = this.getLearnedRules();
+    let currentCustomer = '';
+    const jobs = [];
+    const errors = [];
+    const lines = this.cleanInput(rawText);
+
+    for (const originalLine of lines) {
+      const learnedLogic = learned[this.normalizeSpaces(originalLine).toLowerCase()];
+      const line = learnedLogic || originalLine;
+      const tokens = line.replace(/,/g, ' , ').split(/\s+/).filter(Boolean);
+      let i = 0;
+      let lineCustomer = currentCustomer;
+      let firstJobOnLine = true;
+
+      while (i < tokens.length) {
+        if (tokens[i] === ',') { i++; continue; }
+        const token = tokens[i].toLowerCase();
+        const next = tokens[i + 1];
+        const next2 = tokens[i + 2];
+
+        // Alias pekerjaan di awal/di tengah berarti masih customer yang sama.
+        if (itemsMap[token]) {
+          const qty = parseFloat(next);
+          if (isNaN(qty)) {
+            errors.push({ line: originalLine, customer: lineCustomer || 'Umum', itemAlias: token, amount: 1,
+              aiReason: `Jumlah untuk ${token} belum valid.` });
+            break;
+          }
+          if (!lineCustomer) {
+            errors.push({ line: originalLine, customer: 'Umum', itemAlias: token, amount: qty,
+              aiReason: `Pekerjaan ${token} muncul tanpa nama customer sebelumnya.` });
+            break;
+          }
+          jobs.push({ customer: lineCustomer, alias: token, qty });
+          i += 2;
+          firstJobOnLine = false;
+          continue;
+        }
+
+        // Nama customer + alias + qty, misalnya: budi ckl 3
+        if (next && itemsMap[next.toLowerCase()]) {
+          const qty = parseFloat(next2);
+          if (isNaN(qty)) {
+            errors.push({ line: originalLine, customer: token, itemAlias: next.toLowerCase(), amount: 1,
+              aiReason: `Jumlah "${next2 || ''}" bukan angka.` });
+            break;
+          }
+          lineCustomer = tokens[i];
+          currentCustomer = lineCustomer;
+          jobs.push({ customer: lineCustomer, alias: next.toLowerCase(), qty });
+          i += 3;
+          firstJobOnLine = false;
+          continue;
+        }
+
+        // Nama customer + angka = Setrika default.
+        if (next && /^[-+]?\d+(?:[.,]\d+)?$/.test(next.replace(',', '.'))) {
+          const qty = parseFloat(next.replace(',', '.'));
+          // Di awal baris, token non-alias + angka dianggap customer baru.
+          // Di tengah baris, ini juga menjadi customer baru hanya jika memang belum ada pekerjaan.
+          lineCustomer = tokens[i];
+          currentCustomer = lineCustomer;
+          jobs.push({ customer: lineCustomer, alias: this.DEFAULT_ALIAS_2_WORDS, qty });
+          i += 2;
+          firstJobOnLine = false;
+          continue;
+        }
+
+        // Token biasa tanpa struktur pekerjaan: anggap sebagai bagian nama customer
+        // hanya jika belum ada customer. Jika customer sudah ada, tandai agar tidak diam-diam salah.
+        if (!lineCustomer && firstJobOnLine) {
+          lineCustomer = tokens[i];
+          currentCustomer = lineCustomer;
+          i++;
+          continue;
+        }
+
+        errors.push({ line: originalLine, customer: lineCustomer || 'Umum', itemAlias: token, amount: 1,
+          aiReason: `Format tidak dikenali pada "${token}".` });
+        break;
+      }
+    }
+
+    return { jobs, errors };
+  },
+
+  analyzeLine(line, itemsMap) {
+    const result = this.analyzeBlock(line, itemsMap);
+    if (result.jobs.length === 1 && result.errors.length === 0) {
+      return { status: 'OK', data: result.jobs[0] };
+    }
+    return {
+      status: 'ERROR',
+      reason: 'PARSE_ERROR',
+      suggestion: result.errors[0]?.aiReason || 'Format pekerjaan belum dikenali.'
+    };
   }
 };
+
+function saveNewParserLogic() {
+  const rawEl = document.getElementById('logicWrongInput');
+  const logicEl = document.getElementById('logicNewRule');
+  const raw = rawEl ? rawEl.value.trim() : '';
+  const logic = logicEl ? logicEl.value.trim() : '';
+  if (!raw || !logic) {
+    uiToast('Isi contoh WA yang salah dan logika yang benar terlebih dahulu.');
+    return;
+  }
+  LocalAI.saveLearnedRule(raw, logic);
+  rawEl.value = '';
+  logicEl.value = '';
+  uiToast('Logika baru tersimpan dan akan dipakai parser berikutnya.');
+}
+
 
 // ==========================================
 // 2. PEMROSESAN PENGERJAAN
@@ -115,58 +197,33 @@ async function processInputWA() {
   const rulesMap = await getCommRulesMap();
   const todayStr = new Date().toLocaleDateString('id-ID');
 
-  const cleanedLines = LocalAI.cleanInput(rawInput);
+  const parsed = LocalAI.analyzeBlock(rawInput, itemsMap);
   unmatchedQueue = [];
   const validOrders = [];
 
-  for (let line of cleanedLines) {
-    const result = LocalAI.analyzeLine(line, itemsMap);
-
-    if (result.status === 'OK') {
-      const { customer, alias, qty } = result.data;
-      const item = itemsMap[alias];
-      const ruleKey = `${selectedEmp}_${alias}`;
-      const rule = rulesMap[ruleKey] || { minQuota: 0, tier1Limit: 9999, tier1Rate: 0, tier2Rate: 0 };
-
-      const existingOrders = await getTodayOrders(todayStr);
-      const currentEmpQty = existingOrders
-        .filter(o => o.karyawan === selectedEmp && o.itemAlias === alias)
-        .reduce((sum, o) => sum + o.qty, 0);
-
-      const komisi = calculateTieredCommission(
-        rule.minQuota,
-        rule.tier1Limit,
-        rule.tier1Rate,
-        rule.tier2Rate,
-        currentEmpQty,
-        qty
-      );
-
-      validOrders.push({
-        waktu: new Date().toLocaleTimeString('id-ID', { hour: '2-digit', minute: '2-digit' }),
-        tanggal: todayStr,
-        karyawan: selectedEmp,
-        customer: customer,
-        itemAlias: alias,
-        jenis: item.name,
-        qty: qty,
-        unit: item.unit,
-        price: item.price || 0,
-        totalOmset: qty * (item.price || 0),
-        totalKomisi: komisi
-      });
-    } else {
-      const parts = line.split(' ');
-      unmatchedQueue.push({
-        line: line,
-        customer: parts[0] || 'Umum',
-        empName: selectedEmp,
-        itemAlias: parts[1] ? parts[1].toLowerCase() : 'stk',
-        amount: !isNaN(parseFloat(parts[parts.length - 1])) ? parseFloat(parts[parts.length - 1]) : 1,
-        aiReason: result.suggestion
-      });
-    }
+  for (const job of parsed.jobs) {
+    const { customer, alias, qty } = job;
+    const item = itemsMap[alias];
+    if (!item) continue;
+    const ruleKey = `${selectedEmp}_${alias}`;
+    const rule = rulesMap[ruleKey] || { minQuota: 0, tier1Limit: 9999, tier1Rate: 0, tier2Rate: 0 };
+    const existingOrders = await getTodayOrders(todayStr);
+    const currentEmpQty = existingOrders
+      .filter(o => o.karyawan === selectedEmp && o.itemAlias === alias)
+      .reduce((sum, o) => sum + o.qty, 0);
+    const komisi = calculateTieredCommission(rule.minQuota, rule.tier1Limit, rule.tier1Rate, rule.tier2Rate, currentEmpQty, qty);
+    validOrders.push({
+      waktu: new Date().toLocaleTimeString('id-ID', { hour: '2-digit', minute: '2-digit' }),
+      tanggal: todayStr, karyawan: selectedEmp, customer, itemAlias: alias,
+      jenis: item.name, qty, unit: item.unit, price: item.price || 0,
+      totalOmset: qty * (item.price || 0), totalKomisi: komisi
+    });
   }
+
+  parsed.errors.forEach(err => unmatchedQueue.push({
+    line: err.line, customer: err.customer || 'Umum', empName: selectedEmp,
+    itemAlias: err.itemAlias || 'stk', amount: err.amount || 1, aiReason: err.aiReason
+  }));
 
   if (validOrders.length > 0) {
     const tx = db.transaction('orders', 'readwrite');
